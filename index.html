@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>战争迷雾模拟器</title>
+<style>
+body { font-family: Arial, sans-serif; margin: 20px; }
+#controls { margin-bottom: 10px; }
+#canvasContainer { position: relative; display: inline-block; border: 1px solid #ccc; }
+#imageCanvas, #overlayCanvas { display: block; }
+#overlayCanvas { position: absolute; left: 0; top: 0; z-index: 10; }
+button { font-size: 16px; padding: 4px 10px; }
+#brushSizeDisplay { font-size: 16px; margin: 0 10px; }
+label { margin-right: 10px; }
+</style>
+</head>
+<body>
+<h2>战争迷雾模拟器</h2>
+<div id="controls">
+<input type="file" id="upload" accept="image/*">
+&nbsp;&nbsp;选择模式:
+<label>
+<input type="radio" name="fogMode" id="modeRemove" value="remove" checked> 去除迷雾
+</label>
+<label>
+<input type="radio" name="fogMode" id="modeRestore" value="restore"> 补充迷雾
+</label>
+&nbsp;&nbsp;调整涂抹大小:
+<button id="brushMinus">-</button>
+<span id="brushSizeDisplay">30</span>
+<button id="brushPlus">+</button>
+&nbsp;&nbsp;
+<button id="reset">重置</button>
+</div>
+<div id="canvasContainer">
+<canvas id="imageCanvas"></canvas>
+<canvas id="overlayCanvas"></canvas>
+</div>
+<script>
+let brushSize = 30;
+let isDrawing = false;
+let lastX = 0, lastY = 0;
+let currentMode = "remove";
+
+const uploadInput = document.getElementById("upload");
+const brushPlus = document.getElementById("brushPlus");
+const brushMinus = document.getElementById("brushMinus");
+const brushSizeDisplay = document.getElementById("brushSizeDisplay");
+const resetBtn = document.getElementById("reset");
+const imageCanvas = document.getElementById("imageCanvas");
+const imageCtx = imageCanvas.getContext("2d");
+const overlayCanvas = document.getElementById("overlayCanvas");
+const overlayCtx = overlayCanvas.getContext("2d");
+
+const LS_BACKGROUND = "warFogBackground";
+const LS_OVERLAY = "warFogOverlay";
+
+const modeRemove = document.getElementById("modeRemove");
+const modeRestore = document.getElementById("modeRestore");
+
+modeRemove.addEventListener("change", function() {
+  if (this.checked) {
+    currentMode = "remove";
+  }
+});
+modeRestore.addEventListener("change", function() {
+  if (this.checked) {
+    currentMode = "restore";
+  }
+});
+
+function updateBrushDisplay() {
+  brushSizeDisplay.textContent = brushSize;
+}
+updateBrushDisplay();
+
+function loadState() {
+  const bgData = localStorage.getItem(LS_BACKGROUND);
+  if (bgData) {
+    const bgImg = new Image();
+    bgImg.onload = function() {
+      setCanvasSize(bgImg.width, bgImg.height);
+      imageCtx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+      imageCtx.drawImage(bgImg, 0, 0);
+      const overlayData = localStorage.getItem(LS_OVERLAY);
+      if (overlayData) {
+        const overlayImg = new Image();
+        overlayImg.onload = function() {
+          overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+          overlayCtx.drawImage(overlayImg, 0, 0);
+        }
+        overlayImg.src = overlayData;
+      } else {
+        fillOverlayBlack();
+      }
+    }
+    bgImg.src = bgData;
+  } else {
+    imageCtx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  }
+}
+
+function setCanvasSize(width, height) {
+  imageCanvas.width = width;
+  imageCanvas.height = height;
+  overlayCanvas.width = width;
+  overlayCanvas.height = height;
+  imageCanvas.style.width = width + "px";
+  imageCanvas.style.height = height + "px";
+  overlayCanvas.style.width = width + "px";
+  overlayCanvas.style.height = height + "px";
+}
+
+function fillOverlayBlack() {
+  overlayCtx.globalCompositeOperation = "source-over";
+  overlayCtx.fillStyle = "black";
+  overlayCtx.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  saveOverlayState();
+}
+
+uploadInput.addEventListener("change", function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  localStorage.removeItem(LS_BACKGROUND);
+  localStorage.removeItem(LS_OVERLAY);
+  const reader = new FileReader();
+  reader.onload = function(event) {
+    const dataURL = event.target.result;
+    const img = new Image();
+    img.onload = function() {
+      let newWidth, newHeight;
+      if (img.width >= img.height) {
+        newWidth = 1024;
+        newHeight = Math.round(img.height * (1024 / img.width));
+      } else {
+        newHeight = 1024;
+        newWidth = Math.round(img.width * (1024 / img.height));
+      }
+      setCanvasSize(newWidth, newHeight);
+      imageCtx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+      imageCtx.drawImage(img, 0, 0, newWidth, newHeight);
+      localStorage.setItem(LS_BACKGROUND, imageCanvas.toDataURL("image/png"));
+      fillOverlayBlack();
+    }
+    img.src = dataURL;
+  }
+  reader.readAsDataURL(file);
+});
+
+function getMousePos(canvas, evt) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+}
+
+function getTouchPos(canvas, touch) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+}
+
+function startDrawing(e) {
+  e.preventDefault();
+  isDrawing = true;
+  const pos = getMousePos(overlayCanvas, e);
+  lastX = pos.x;
+  lastY = pos.y;
+  drawCircle(lastX, lastY);
+}
+
+function draw(e) {
+  if (!isDrawing) return;
+  e.preventDefault();
+  const pos = getMousePos(overlayCanvas, e);
+  overlayCtx.save();
+  if (currentMode === "remove") {
+    overlayCtx.globalCompositeOperation = "destination-out";
+  } else if (currentMode === "restore") {
+    overlayCtx.globalCompositeOperation = "source-over";
+    overlayCtx.strokeStyle = "black";
+  }
+  overlayCtx.lineCap = "round";
+  overlayCtx.lineJoin = "round";
+  overlayCtx.lineWidth = brushSize * 2;
+  overlayCtx.beginPath();
+  overlayCtx.moveTo(lastX, lastY);
+  overlayCtx.lineTo(pos.x, pos.y);
+  overlayCtx.stroke();
+  overlayCtx.restore();
+  lastX = pos.x;
+  lastY = pos.y;
+}
+
+function stopDrawing(e) {
+  if (!isDrawing) return;
+  e.preventDefault();
+  isDrawing = false;
+  saveOverlayState();
+}
+
+function startTouch(e) {
+  e.preventDefault();
+  isDrawing = true;
+  if(e.touches.length > 0){
+    const pos = getTouchPos(overlayCanvas, e.touches[0]);
+    lastX = pos.x;
+    lastY = pos.y;
+    drawCircle(lastX, lastY);
+  }
+}
+
+function moveTouch(e) {
+  if (!isDrawing) return;
+  e.preventDefault();
+  if(e.touches.length > 0){
+    const pos = getTouchPos(overlayCanvas, e.touches[0]);
+    overlayCtx.save();
+    if (currentMode === "remove") {
+      overlayCtx.globalCompositeOperation = "destination-out";
+    } else if (currentMode === "restore") {
+      overlayCtx.globalCompositeOperation = "source-over";
+      overlayCtx.strokeStyle = "black";
+    }
+    overlayCtx.lineCap = "round";
+    overlayCtx.lineJoin = "round";
+    overlayCtx.lineWidth = brushSize * 2;
+    overlayCtx.beginPath();
+    overlayCtx.moveTo(lastX, lastY);
+    overlayCtx.lineTo(pos.x, pos.y);
+    overlayCtx.stroke();
+    overlayCtx.restore();
+    lastX = pos.x;
+    lastY = pos.y;
+  }
+}
+
+function endTouch(e) {
+  if (!isDrawing) return;
+  e.preventDefault();
+  isDrawing = false;
+  saveOverlayState();
+}
+
+function drawCircle(x, y) {
+  overlayCtx.save();
+  if (currentMode === "remove") {
+    overlayCtx.globalCompositeOperation = "destination-out";
+  } else if (currentMode === "restore") {
+    overlayCtx.globalCompositeOperation = "source-over";
+    overlayCtx.fillStyle = "black";
+  }
+  overlayCtx.beginPath();
+  overlayCtx.arc(x, y, brushSize, 0, Math.PI * 2);
+  overlayCtx.fill();
+  overlayCtx.restore();
+}
+
+function saveOverlayState() {
+  try {
+    const dataURL = overlayCanvas.toDataURL("image/png");
+    localStorage.setItem(LS_OVERLAY, dataURL);
+  } catch (e) {
+    console.error("保存状态失败:", e);
+  }
+}
+
+overlayCanvas.addEventListener("mousedown", startDrawing);
+overlayCanvas.addEventListener("mousemove", draw);
+overlayCanvas.addEventListener("mouseup", stopDrawing);
+overlayCanvas.addEventListener("mouseout", stopDrawing);
+
+overlayCanvas.addEventListener("touchstart", startTouch);
+overlayCanvas.addEventListener("touchmove", moveTouch);
+overlayCanvas.addEventListener("touchend", endTouch);
+overlayCanvas.addEventListener("touchcancel", endTouch);
+
+brushPlus.addEventListener("click", function() {
+  brushSize++;
+  updateBrushDisplay();
+});
+brushMinus.addEventListener("click", function() {
+  if (brushSize > 1) {
+    brushSize--;
+    updateBrushDisplay();
+  }
+});
+
+resetBtn.addEventListener("click", function() {
+  if(confirm("确定要重置吗？重置后需重新上传图片。")){
+    localStorage.removeItem(LS_BACKGROUND);
+    localStorage.removeItem(LS_OVERLAY);
+    imageCtx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  }
+});
+
+window.addEventListener("load", function() {
+  loadState();
+});
+</script>
+</body>
+</html>
