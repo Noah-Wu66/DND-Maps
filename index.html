@@ -1,301 +1,308 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<title>战争迷雾模拟器</title>
-<style>
-body { font-family: Arial, sans-serif; margin: 20px; }
-#controls { margin-bottom: 10px; }
-#canvasContainer { position: relative; display: inline-block; border: 1px solid #ccc; }
-#imageCanvas, #overlayCanvas { display: block; }
-#overlayCanvas { position: absolute; left: 0; top: 0; z-index: 10; }
-button { font-size: 16px; padding: 4px 10px; }
-#brushSizeDisplay { font-size: 16px; margin: 0 10px; }
-label { margin-right: 10px; }
-</style>
+    <meta charset="UTF-8">
+    <title>战争迷雾模拟器</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            margin: 10px;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+
+        #controls {
+            padding: 10px;
+            margin: 10px auto;
+            background: white;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            max-width: 600px;
+        }
+
+        #canvasContainer {
+            position: relative;
+            display: inline-block;
+            margin: 10px auto;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #overlayCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            touch-action: none;
+        }
+
+        button {
+            padding: 6px 12px;
+            margin: 4px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: #eee;
+        }
+
+        #orientationOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.9);
+            color: white;
+            font-size: 24px;
+            align-items: center;
+            justify-content: center;
+            display: none;
+        }
+    </style>
 </head>
 <body>
-<h2>战争迷雾模拟器</h2>
-<div id="controls">
-<input type="file" id="upload" accept="image/*">
-&nbsp;&nbsp;选择模式:
-<label>
-<input type="radio" name="fogMode" id="modeRemove" value="remove" checked> 去除迷雾
-</label>
-<label>
-<input type="radio" name="fogMode" id="modeRestore" value="restore"> 补充迷雾
-</label>
-&nbsp;&nbsp;调整涂抹大小:
-<button id="brushMinus">-</button>
-<span id="brushSizeDisplay">30</span>
-<button id="brushPlus">+</button>
-&nbsp;&nbsp;
-<button id="reset">重置</button>
-</div>
-<div id="canvasContainer">
-<canvas id="imageCanvas"></canvas>
-<canvas id="overlayCanvas"></canvas>
-</div>
+    <h2>战争迷雾模拟器</h2>
+    <div id="controls">
+        <input type="file" id="upload" accept="image/*">
+        <div>
+            <label><input type="checkbox" id="modeRemove"> 去除迷雾</label>
+            <label><input type="checkbox" id="modeRestore"> 补充迷雾</label>
+        </div>
+        <div>
+            画笔大小: 
+            <button id="brushMinus">-</button>
+            <span id="brushSizeDisplay">25</span>
+            <button id="brushPlus">+</button>
+            <button id="reset">重置</button>
+        </div>
+    </div>
+    <div id="canvasContainer">
+        <canvas id="imageCanvas"></canvas>
+        <canvas id="overlayCanvas"></canvas>
+    </div>
+    <div id="orientationOverlay">请使用横屏模式</div>
+
 <script>
-let brushSize = 30;
-let isDrawing = false;
-let lastX = 0, lastY = 0;
-let currentMode = "remove";
+const MAX_SIZE = 1024 // 新增最大尺寸限制
+const LS_BACKGROUND = 'warFogBackground'
+const LS_OVERLAY = 'warFogOverlay'
+let brushSize = 25
+let isDrawing = false
+let lastX = 0, lastY = 0
+let currentMode = 'none'
 
-const uploadInput = document.getElementById("upload");
-const brushPlus = document.getElementById("brushPlus");
-const brushMinus = document.getElementById("brushMinus");
-const brushSizeDisplay = document.getElementById("brushSizeDisplay");
-const resetBtn = document.getElementById("reset");
-const imageCanvas = document.getElementById("imageCanvas");
-const imageCtx = imageCanvas.getContext("2d");
-const overlayCanvas = document.getElementById("overlayCanvas");
-const overlayCtx = overlayCanvas.getContext("2d");
-
-const LS_BACKGROUND = "warFogBackground";
-const LS_OVERLAY = "warFogOverlay";
-
-const modeRemove = document.getElementById("modeRemove");
-const modeRestore = document.getElementById("modeRestore");
-
-modeRemove.addEventListener("change", function() {
-  if (this.checked) {
-    currentMode = "remove";
-  }
-});
-modeRestore.addEventListener("change", function() {
-  if (this.checked) {
-    currentMode = "restore";
-  }
-});
-
-function updateBrushDisplay() {
-  brushSizeDisplay.textContent = brushSize;
+const elems = {
+    upload: document.getElementById('upload'),
+    imageCanvas: document.getElementById('imageCanvas'),
+    overlayCanvas: document.getElementById('overlayCanvas'),
+    brushSizeDisplay: document.getElementById('brushSizeDisplay'),
+    modeRemove: document.getElementById('modeRemove'),
+    modeRestore: document.getElementById('modeRestore')
 }
-updateBrushDisplay();
+
+const ctx = {
+    image: elems.imageCanvas.getContext('2d'),
+    overlay: elems.overlayCanvas.getContext('2d')
+}
+
+function initEvents() {
+    elems.upload.addEventListener('change', handleUpload)
+    elems.modeRemove.addEventListener('change', handleModeChange)
+    elems.modeRestore.addEventListener('change', handleModeChange)
+    document.getElementById('brushPlus').addEventListener('click', () => setBrushSize(1))
+    document.getElementById('brushMinus').addEventListener('click', () => setBrushSize(-1))
+    document.getElementById('reset').addEventListener('click', resetCanvas)
+
+    const handleStart = (e) => {
+        if(currentMode === 'none') return
+        e.preventDefault()
+        isDrawing = true
+        updatePosition(getEventPos(e))
+        drawCircle()
+    }
+
+    const handleMove = (e) => {
+        if(!isDrawing) return
+        e.preventDefault()
+        updatePosition(getEventPos(e))
+        drawLine()
+    }
+
+    const handleEnd = () => {
+        if(!isDrawing) return
+        isDrawing = false
+        saveState()
+    }
+
+    elems.overlayCanvas.addEventListener('mousedown', handleStart)
+    elems.overlayCanvas.addEventListener('mousemove', handleMove)
+    elems.overlayCanvas.addEventListener('mouseup', handleEnd)
+    elems.overlayCanvas.addEventListener('mouseleave', handleEnd)
+    elems.overlayCanvas.addEventListener('touchstart', handleStart)
+    elems.overlayCanvas.addEventListener('touchmove', handleMove)
+    elems.overlayCanvas.addEventListener('touchend', handleEnd)
+}
+
+// 图片尺寸约束逻辑
+function calculateDimensions(img) {
+    const maxWidth = Math.min(MAX_SIZE, window.innerWidth * 0.9)
+    const maxHeight = Math.min(MAX_SIZE, window.innerHeight * 0.7)
+    const scale = Math.min(maxWidth / img.width, maxHeight / img.height)
+    
+    return {
+        width: Math.round(img.width * scale),
+        height: Math.round(img.height * scale)
+    }
+}
+
+async function handleUpload(e) {
+    const file = e.target.files[0]
+    if(!file) return
+
+    const img = await new Promise(resolve => {
+        const reader = new FileReader()
+        reader.onload = e => {
+            const img = new Image()
+            img.onload = () => resolve(img)
+            img.src = e.target.result
+        }
+        reader.readAsDataURL(file)
+    })
+
+    const { width, height } = calculateDimensions(img)
+    setCanvasSize(width, height)
+    ctx.image.drawImage(img, 0, 0, width, height)
+    initOverlay()
+    saveState()
+}
+
+function setCanvasSize(w, h) {
+    ;[elems.imageCanvas, elems.overlayCanvas].forEach(canvas => {
+        canvas.width = w
+        canvas.height = h
+        canvas.style.width = `${w}px`
+        canvas.style.height = `${h}px`
+    })
+}
+
+function handleModeChange(e) {
+    if(e.target.checked) {
+        if(e.target === elems.modeRemove) {
+            elems.modeRestore.checked = false
+            currentMode = 'remove'
+        } else {
+            elems.modeRemove.checked = false
+            currentMode = 'restore'
+        }
+    } else {
+        currentMode = 'none'
+    }
+}
+
+function setBrushSize(change) {
+    brushSize = Math.max(1, brushSize + change)
+    elems.brushSizeDisplay.textContent = brushSize
+}
+
+function getEventPos(e) {
+    const rect = elems.overlayCanvas.getBoundingClientRect()
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY
+    return [
+        (clientX - rect.left) * (elems.overlayCanvas.width / rect.width),
+        (clientY - rect.top) * (elems.overlayCanvas.height / rect.height)
+    ]
+}
+
+function updatePosition([x, y]) {
+    lastX = x
+    lastY = y
+}
+
+function drawCircle() {
+    ctx.overlay.save()
+    ctx.overlay.globalCompositeOperation = currentMode === 'remove' 
+        ? 'destination-out' 
+        : 'source-over'
+    
+    if(currentMode === 'restore') ctx.overlay.fillStyle = '#000'
+    
+    ctx.overlay.beginPath()
+    ctx.overlay.arc(lastX, lastY, brushSize, 0, Math.PI * 2)
+    ctx.overlay.fill()
+    ctx.overlay.restore()
+}
+
+function drawLine() {
+    ctx.overlay.save()
+    ctx.overlay.globalCompositeOperation = currentMode === 'remove' 
+        ? 'destination-out' 
+        : 'source-over'
+    
+    ctx.overlay.lineCap = 'round'
+    ctx.overlay.lineWidth = brushSize * 2
+    if(currentMode === 'restore') ctx.overlay.strokeStyle = '#000'
+    
+    ctx.overlay.beginPath()
+    ctx.overlay.moveTo(lastX, lastY)
+    ctx.overlay.lineTo(lastX, lastY)
+    ctx.overlay.stroke()
+    ctx.overlay.restore()
+}
+
+function initOverlay() {
+    ctx.overlay.fillStyle = '#000'
+    ctx.overlay.fillRect(0, 0, elems.overlayCanvas.width, elems.overlayCanvas.height)
+}
+
+function saveState() {
+    localStorage.setItem(LS_BACKGROUND, elems.imageCanvas.toDataURL())
+    localStorage.setItem(LS_OVERLAY, elems.overlayCanvas.toDataURL())
+}
 
 function loadState() {
-  const bgData = localStorage.getItem(LS_BACKGROUND);
-  if (bgData) {
-    const bgImg = new Image();
-    bgImg.onload = function() {
-      setCanvasSize(bgImg.width, bgImg.height);
-      imageCtx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
-      imageCtx.drawImage(bgImg, 0, 0);
-      const overlayData = localStorage.getItem(LS_OVERLAY);
-      if (overlayData) {
-        const overlayImg = new Image();
-        overlayImg.onload = function() {
-          overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-          overlayCtx.drawImage(overlayImg, 0, 0);
+    const bg = localStorage.getItem(LS_BACKGROUND)
+    const overlay = localStorage.getItem(LS_OVERLAY)
+    
+    if(bg) {
+        const img = new Image()
+        img.onload = () => {
+            const { width, height } = calculateDimensions(img)
+            setCanvasSize(width, height)
+            ctx.image.drawImage(img, 0, 0, width, height)
         }
-        overlayImg.src = overlayData;
-      } else {
-        fillOverlayBlack();
-      }
+        img.src = bg
     }
-    bgImg.src = bgData;
-  } else {
-    imageCtx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
-    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-  }
-}
-
-function setCanvasSize(width, height) {
-  imageCanvas.width = width;
-  imageCanvas.height = height;
-  overlayCanvas.width = width;
-  overlayCanvas.height = height;
-  imageCanvas.style.width = width + "px";
-  imageCanvas.style.height = height + "px";
-  overlayCanvas.style.width = width + "px";
-  overlayCanvas.style.height = height + "px";
-}
-
-function fillOverlayBlack() {
-  overlayCtx.globalCompositeOperation = "source-over";
-  overlayCtx.fillStyle = "black";
-  overlayCtx.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-  saveOverlayState();
-}
-
-uploadInput.addEventListener("change", function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  localStorage.removeItem(LS_BACKGROUND);
-  localStorage.removeItem(LS_OVERLAY);
-  const reader = new FileReader();
-  reader.onload = function(event) {
-    const dataURL = event.target.result;
-    const img = new Image();
-    img.onload = function() {
-      let newWidth, newHeight;
-      if (img.width >= img.height) {
-        newWidth = 1024;
-        newHeight = Math.round(img.height * (1024 / img.width));
-      } else {
-        newHeight = 1024;
-        newWidth = Math.round(img.width * (1024 / img.height));
-      }
-      setCanvasSize(newWidth, newHeight);
-      imageCtx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
-      imageCtx.drawImage(img, 0, 0, newWidth, newHeight);
-      localStorage.setItem(LS_BACKGROUND, imageCanvas.toDataURL("image/png"));
-      fillOverlayBlack();
+    
+    if(overlay) {
+        const img = new Image()
+        img.onload = () => ctx.overlay.drawImage(img, 0, 0)
+        img.src = overlay
     }
-    img.src = dataURL;
-  }
-  reader.readAsDataURL(file);
-});
-
-function getMousePos(canvas, evt) {
-  const rect = canvas.getBoundingClientRect();
-  return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
 }
 
-function getTouchPos(canvas, touch) {
-  const rect = canvas.getBoundingClientRect();
-  return { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
-}
-
-function startDrawing(e) {
-  e.preventDefault();
-  isDrawing = true;
-  const pos = getMousePos(overlayCanvas, e);
-  lastX = pos.x;
-  lastY = pos.y;
-  drawCircle(lastX, lastY);
-}
-
-function draw(e) {
-  if (!isDrawing) return;
-  e.preventDefault();
-  const pos = getMousePos(overlayCanvas, e);
-  overlayCtx.save();
-  if (currentMode === "remove") {
-    overlayCtx.globalCompositeOperation = "destination-out";
-  } else if (currentMode === "restore") {
-    overlayCtx.globalCompositeOperation = "source-over";
-    overlayCtx.strokeStyle = "black";
-  }
-  overlayCtx.lineCap = "round";
-  overlayCtx.lineJoin = "round";
-  overlayCtx.lineWidth = brushSize * 2;
-  overlayCtx.beginPath();
-  overlayCtx.moveTo(lastX, lastY);
-  overlayCtx.lineTo(pos.x, pos.y);
-  overlayCtx.stroke();
-  overlayCtx.restore();
-  lastX = pos.x;
-  lastY = pos.y;
-}
-
-function stopDrawing(e) {
-  if (!isDrawing) return;
-  e.preventDefault();
-  isDrawing = false;
-  saveOverlayState();
-}
-
-function startTouch(e) {
-  e.preventDefault();
-  isDrawing = true;
-  if(e.touches.length > 0){
-    const pos = getTouchPos(overlayCanvas, e.touches[0]);
-    lastX = pos.x;
-    lastY = pos.y;
-    drawCircle(lastX, lastY);
-  }
-}
-
-function moveTouch(e) {
-  if (!isDrawing) return;
-  e.preventDefault();
-  if(e.touches.length > 0){
-    const pos = getTouchPos(overlayCanvas, e.touches[0]);
-    overlayCtx.save();
-    if (currentMode === "remove") {
-      overlayCtx.globalCompositeOperation = "destination-out";
-    } else if (currentMode === "restore") {
-      overlayCtx.globalCompositeOperation = "source-over";
-      overlayCtx.strokeStyle = "black";
+function resetCanvas() {
+    if(confirm('确定要重置吗？')) {
+        localStorage.clear()
+        ctx.image.clearRect(0, 0, elems.imageCanvas.width, elems.imageCanvas.height)
+        initOverlay()
     }
-    overlayCtx.lineCap = "round";
-    overlayCtx.lineJoin = "round";
-    overlayCtx.lineWidth = brushSize * 2;
-    overlayCtx.beginPath();
-    overlayCtx.moveTo(lastX, lastY);
-    overlayCtx.lineTo(pos.x, pos.y);
-    overlayCtx.stroke();
-    overlayCtx.restore();
-    lastX = pos.x;
-    lastY = pos.y;
-  }
 }
 
-function endTouch(e) {
-  if (!isDrawing) return;
-  e.preventDefault();
-  isDrawing = false;
-  saveOverlayState();
+function init() {
+    loadState()
+    initEvents()
+    
+    window.addEventListener('resize', () => {
+        document.getElementById('orientationOverlay').style.display = 
+            window.innerWidth < window.innerHeight ? 'flex' : 'none'
+    })
 }
 
-function drawCircle(x, y) {
-  overlayCtx.save();
-  if (currentMode === "remove") {
-    overlayCtx.globalCompositeOperation = "destination-out";
-  } else if (currentMode === "restore") {
-    overlayCtx.globalCompositeOperation = "source-over";
-    overlayCtx.fillStyle = "black";
-  }
-  overlayCtx.beginPath();
-  overlayCtx.arc(x, y, brushSize, 0, Math.PI * 2);
-  overlayCtx.fill();
-  overlayCtx.restore();
-}
-
-function saveOverlayState() {
-  try {
-    const dataURL = overlayCanvas.toDataURL("image/png");
-    localStorage.setItem(LS_OVERLAY, dataURL);
-  } catch (e) {
-    console.error("保存状态失败:", e);
-  }
-}
-
-overlayCanvas.addEventListener("mousedown", startDrawing);
-overlayCanvas.addEventListener("mousemove", draw);
-overlayCanvas.addEventListener("mouseup", stopDrawing);
-overlayCanvas.addEventListener("mouseout", stopDrawing);
-
-overlayCanvas.addEventListener("touchstart", startTouch);
-overlayCanvas.addEventListener("touchmove", moveTouch);
-overlayCanvas.addEventListener("touchend", endTouch);
-overlayCanvas.addEventListener("touchcancel", endTouch);
-
-brushPlus.addEventListener("click", function() {
-  brushSize++;
-  updateBrushDisplay();
-});
-brushMinus.addEventListener("click", function() {
-  if (brushSize > 1) {
-    brushSize--;
-    updateBrushDisplay();
-  }
-});
-
-resetBtn.addEventListener("click", function() {
-  if(confirm("确定要重置吗？重置后需重新上传图片。")){
-    localStorage.removeItem(LS_BACKGROUND);
-    localStorage.removeItem(LS_OVERLAY);
-    imageCtx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
-    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-  }
-});
-
-window.addEventListener("load", function() {
-  loadState();
-});
+init()
 </script>
 </body>
 </html>
